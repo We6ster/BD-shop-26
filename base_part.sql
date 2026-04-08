@@ -1,3 +1,4 @@
+--активные товары дороже среднего по своей категории
 SELECT 
     p.title,
     p.category,
@@ -13,7 +14,7 @@ WHERE p.status = 'active'
 ORDER BY p.category, p.price DESC;
 
 
-
+--активные участники - кто одновременно и продает, и покупает
 SELECT *
 FROM (
     SELECT 
@@ -34,7 +35,7 @@ FROM (
 ORDER BY total_activity DESC;
 
 
-
+--самые дорогие продажи - топ-5 самых дорогих завершенных сделок
 SELECT 
     p.title,
     p.category,
@@ -51,7 +52,7 @@ ORDER BY pur.amount DESC
 LIMIT 5;
 
 
-
+--все активные товары у каждого продавца
 SELECT 
     u.user_id,
     u.name,
@@ -66,7 +67,7 @@ HAVING COUNT(p.product_id) > 0
 ORDER BY active_products DESC;
 
 
-
+--оплаченные, но еще не доставленные товары
 SELECT 
     pur.purchase_id,
     p.title as product_name,
@@ -84,7 +85,7 @@ WHERE pur.status = 'paid'
 ORDER BY days_waiting DESC;
 
 
-
+--самые популярные категории
 SELECT 
     p.category,
     COUNT(pur.purchase_id) as total_sales,
@@ -98,7 +99,7 @@ GROUP BY p.category
 ORDER BY total_sales DESC;
 
 
-
+--пользователи с рейтингом 4.8+ и чем занимаются
 SELECT 
     u.user_id,
     u.name,
@@ -116,7 +117,7 @@ GROUP BY u.user_id, u.name, u.rating
 ORDER BY u.rating DESC;
 
 
-
+--товары со скидкой, где фактическая цена продажи ниже заявленной
 SELECT 
     p.title,
     p.price as listed_price,
@@ -133,7 +134,7 @@ WHERE pur.amount < p.price
 ORDER BY discount_percent DESC;
 
 
-
+--все негативные отзывы с рейтингом 1-2
 SELECT 
     r.rating,
     r.comment,
@@ -150,7 +151,7 @@ WHERE r.rating <= 2
 ORDER BY r.rating ASC, r.created_at DESC;
 
 
-
+--статистика продаж по месяцам
 SELECT 
     TO_CHAR(DATE_TRUNC('month', pur.created_at), 'YYYY-MM') as month,
     COUNT(pur.purchase_id) as total_orders,
