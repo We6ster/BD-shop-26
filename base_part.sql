@@ -106,12 +106,12 @@ SELECT
     u.rating,
     COUNT(DISTINCT CASE WHEN p.status = 'active' THEN p.product_id END) as products_on_sale,
     COUNT(DISTINCT pur.purchase_id) as total_purchases,
-    COUNT(DISTINCT r.rewiew_id) as reviews_written,
+    COUNT(DISTINCT r.review_id) as reviews_written,
     ROUND(AVG(r.rating), 2) as avg_rating_given
 FROM users u
 LEFT JOIN products p ON u.user_id = p.seller_id
 LEFT JOIN purchases pur ON u.user_id = pur.buyer_id
-LEFT JOIN rewiews r ON u.user_id = r.rewiewer_id
+LEFT JOIN reviews r ON u.user_id = r.reviewer_id
 WHERE u.rating >= 4.8
 GROUP BY u.user_id, u.name, u.rating
 ORDER BY u.rating DESC;
@@ -142,9 +142,9 @@ SELECT
     u_reviewed.name as reviewed_user,
     p.title as product_name,
     r.created_at
-FROM rewiews r
-JOIN users u_reviewer ON r.rewiewer_id = u_reviewer.user_id
-JOIN users u_reviewed ON r.rewiewed_id = u_reviewed.user_id
+FROM reviews r
+JOIN users u_reviewer ON r.reviewer_id = u_reviewer.user_id
+JOIN users u_reviewed ON r.reviewed_id = u_reviewed.user_id
 JOIN purchases pur ON r.purchase_id = pur.purchase_id
 JOIN products p ON pur.product_id = p.product_id
 WHERE r.rating <= 2
