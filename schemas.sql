@@ -36,6 +36,9 @@ CREATE TABLE IF NOT EXISTS shop.products (
 	CONSTRAINT "check_products_valid_to" CHECK (valid_to >= valid_from)
 );
 
+--Для поиска активных товаров по категории и цене
+CREATE INDEX idx_products_category_price ON products(category, price) 
+WHERE status = 'active';
 
 
 
@@ -56,6 +59,8 @@ CREATE TABLE IF NOT EXISTS shop.purchases (
 	CONSTRAINT "check_buyer_and_seller_id" CHECK (buyer_id <> seller_id)
 );
 
+--Для поиска покупок по покупателю с сортировкой по дате
+CREATE INDEX idx_purchases_buyer_created ON purchases(buyer_id, created_at DESC);
 
 
 
@@ -73,16 +78,19 @@ CREATE TABLE IF NOT EXISTS shop.payments (
 
 
 
-CREATE TABLE IF NOT EXISTS shop.rewiews (
-	"rewiew_id" SERIAL NOT NULL UNIQUE,
+CREATE TABLE IF NOT EXISTS shop.reviews (
+	"review_id" SERIAL NOT NULL UNIQUE,
 	"purchase_id" INTEGER NOT NULL,
-	"rewiewer_id" INTEGER NOT NULL,
-	"rewiewed_id" INTEGER NOT NULL,
+	"reviewer_id" INTEGER NOT NULL,
+	"reviewed_id" INTEGER NOT NULL,
 	"rating" SMALLINT NOT NULL DEFAULT 0,
 	"comment" TEXT,
 	"created_at" TIMESTAMP NOT NULL DEFAULT now(),
-	PRIMARY KEY("rewiew_id")
+	PRIMARY KEY("review_id")
 );
+
+--Для поиска отзывов по оценке
+CREATE INDEX idx_reviews_rating ON reviews(reviewed_id, rating DESC);
 
 
 
@@ -96,9 +104,59 @@ ALTER TABLE shop.purchases
 ADD FOREIGN KEY("product_id") REFERENCES shop.products("product_id");
 ALTER TABLE shop.payments
 ADD FOREIGN KEY("purchase_id") REFERENCES shop.purchases("purchase_id");
-ALTER TABLE shop.rewiews
+ALTER TABLE shop.reviews
 ADD FOREIGN KEY("purchase_id") REFERENCES shop.purchases("purchase_id");
-ALTER TABLE shop.rewiews
-ADD FOREIGN KEY("rewiewer_id") REFERENCES shop.users("user_id");
-ALTER TABLE shop.rewiews
-ADD FOREIGN KEY("rewiewed_id") REFERENCES shop.users("user_id");
+ALTER TABLE shop.reviews
+ADD FOREIGN KEY("reviewer_id") REFERENCES shop.users("user_id");
+ALTER TABLE shop.reviews
+ADD FOREIGN KEY("reviewed_id") REFERENCES shop.users("user_id");
+
+
+
+--Все активные товары
+CREATE OR REPLACE VIEW v_active_products_with_sellers AS
+SELECT 
+    p.product_id,
+    p.title,
+    p.category,
+    p.price,
+    p.condition,
+    p.created_at as listed_at,
+    u.user_id as seller_id,
+    u.name as seller_name,
+    u.rating as seller_rating,
+    COUNT(r.rewiew_id) as seller_total_reviews,
+    ROUND(AVG(CASE WHEN r.rewiewed_id = u.user_id THEN r.rating END), 1) as seller_avg_rating
+FROM products p
+JOIN users u ON p.seller_id = u.user_id
+LEFT JOIN rewiews r ON u.user_id = r.rewiewed_id
+WHERE p.status = 'active'
+GROUP BY p.product_id, p.title, p.category, p.price, p.condition, 
+         p.created_at, u.user_id, u.name, u.rating;
+
+
+
+--Ежемесячный отчёт по продажам
+CREATE MATERIALIZED VIEW mv_monthly_sales_report AS
+SELECT 
+    DATE_TRUNC('month', pur.created_at) as month,
+    p.category,
+    COUNT(DISTINCT pur.purchase_id) as total_orders,
+    COUNT(DISTINCT pur.buyer_id) as unique_buyers,
+    COUNT(DISTINCT pur.seller_id) as unique_sellers,
+    SUM(pur.amount) as revenue,
+    ROUND(AVG(pur.amount), 2) as avg_order_value,
+    SUM(CASE WHEN pay.status = 'completed' THEN pay.amount ELSE 0 END) as successfully_paid,
+    SUM(CASE WHEN pay.status = 'failed' THEN pay.amount ELSE 0 END) as failed_payments,
+    COUNT(CASE WHEN pur.status = 'cancelled' THEN 1 END) as cancelled_orders
+FROM purchases pur
+JOIN products p ON pur.product_id = p.product_id
+LEFT JOIN payments pay ON pur.purchase_id = pay.purchase_id
+WHERE pur.status IN ('delivered', 'paid', 'shipped', 'cancelled')
+GROUP BY DATE_TRUNC('month', pur.created_at), p.category
+ORDER BY month DESC, revenue DESC;
+
+CREATE INDEX idx_mv_monthly_sales ON mv_monthly_sales_report(month, category);
+
+--Позже будет добавлен триггер
+REFRESH MATERIALIZED VIEW mv_monthly_sales_report;
