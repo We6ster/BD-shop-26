@@ -149,7 +149,7 @@ INSERT INTO shop.payments (purchase_id, amount, method, status, created_at) VALU
 (38, 600.00, 'credit_card', 'pending', '2024-04-25 09:45:00'),
 (39, 8500.00, 'bank_transfer', 'completed', '2024-04-28 14:30:00');
 
-INSERT INTO shop.rewiews (purchase_id, rewiewer_id, rewiewed_id, rating, comment, created_at) VALUES
+INSERT INTO shop.reviews (purchase_id, reviewer_id, reviewed_id, rating, comment, created_at) VALUES
 (2, 1, 2, 5, 'Excellent watch, fast shipping!', '2024-01-26 10:00:00'),
 (15, 1, 15, 4, 'Good LEGO set, missing one small piece though', '2024-02-16 09:00:00'),
 (22, 1, 22, 5, 'Beautiful Breitling, exactly as described', '2024-03-18 14:00:00'),
