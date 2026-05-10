@@ -40,6 +40,41 @@ CREATE TABLE IF NOT EXISTS shop.products (
 CREATE INDEX idx_products_category_price ON products(category, price) 
 WHERE status = 'active';
 
+--Списание старого товара в архив
+CREATE OR REPLACE PROCEDURE archive_product(p_product_id INTEGER)
+LANGUAGE plpgsql AS $$
+BEGIN
+    UPDATE products
+    SET status = 'archived',
+        updated_at = NOW()
+    WHERE product_id = p_product_id
+      AND status = 'active';
+    
+    IF FOUND THEN
+        RAISE NOTICE 'Товар % заархивирован', p_product_id;
+    ELSE
+        RAISE NOTICE 'Товар % не найден или уже не активен', p_product_id;
+    END IF;
+END;
+$$;
+
+CALL archive_product(25);
+
+--Автообновление updated_at при изменении товара
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER
+LANGUAGE plpgsql AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_products_updated_at
+BEFORE UPDATE ON products
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
+
 
 
 CREATE TABLE IF NOT EXISTS shop.purchases (
@@ -62,6 +97,30 @@ CREATE TABLE IF NOT EXISTS shop.purchases (
 --Для поиска покупок по покупателю с сортировкой по дате
 CREATE INDEX idx_purchases_buyer_created ON purchases(buyer_id, created_at DESC);
 
+--Автообновление updated_at при изменении товара для purchases
+CREATE TRIGGER trg_purchases_updated_at
+BEFORE UPDATE ON purchases
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
+
+--Подсчёт общего количества покупок пользователя
+CREATE OR REPLACE FUNCTION get_user_purchase_count(p_user_id INTEGER)
+RETURNS INTEGER AS $$
+DECLARE
+    purchase_count INTEGER;
+BEGIN
+    SELECT COUNT(*) INTO purchase_count
+    FROM purchases
+    WHERE buyer_id = p_user_id;
+    
+    RETURN purchase_count;
+END;
+$$ LANGUAGE plpgsql;
+
+SELECT user_id, name, get_user_purchase_count(user_id) as total_purchases
+FROM users
+WHERE user_id = 4;
+
 
 
 CREATE TABLE IF NOT EXISTS shop.payments (
@@ -75,6 +134,17 @@ CREATE TABLE IF NOT EXISTS shop.payments (
 	CONSTRAINT "check_payments_status" CHECK (status IN ('pending', 'completed', 'failed', 'refunded'))
 );
 
+--Очистка старых неудачных платежей
+CREATE OR REPLACE PROCEDURE cleanup_failed_payments(p_days_old INTEGER DEFAULT 30)
+LANGUAGE plpgsql AS $$
+BEGIN
+    DELETE FROM payments
+    WHERE status = 'failed'
+      AND created_at < NOW() - (p_days_old || ' days')::INTERVAL;
+END;
+$$;
+
+CALL cleanup_failed_payments(10);
 
 
 
@@ -91,6 +161,43 @@ CREATE TABLE IF NOT EXISTS shop.reviews (
 
 --Для поиска отзывов по оценке
 CREATE INDEX idx_reviews_rating ON reviews(reviewed_id, rating DESC);
+
+--Защита от повторного отзыва на одну покупку
+CREATE OR REPLACE FUNCTION prevent_duplicate_review()
+RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+    existing_review_id INTEGER;
+BEGIN
+    SELECT review_id INTO existing_review_id
+    FROM reviews
+    WHERE purchase_id = NEW.purchase_id 
+      AND reviewer_id = NEW.reviewer_id;
+    
+    IF FOUND THEN
+        RAISE EXCEPTION 'Вы уже оставили отзыв на эту покупку (review_id = %)', existing_review_id;
+    END IF;
+    
+    IF NEW.reviewer_id = NEW.reviewed_id THEN
+        RAISE EXCEPTION 'Нельзя оставить отзыв на самого себя';
+    END IF;
+    
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_prevent_duplicate_review
+BEFORE INSERT ON reviews
+FOR EACH ROW
+EXECUTE FUNCTION prevent_duplicate_review();
+
+-- Первый отзыв на покупку 1 от пользователя 2
+INSERT INTO reviews (purchase_id, reviewer_id, reviewed_id, rating, comment)
+VALUES (1, 2, 1, 5, 'Отличный продавец!');
+
+-- Попытка оставить второй отзыв на ту же покупку от того же пользователя
+INSERT INTO reviews (purchase_id, reviewer_id, reviewed_id, rating, comment)
+VALUES (1, 2, 1, 4, 'Накрутка отзывов');
 
 
 
@@ -112,7 +219,6 @@ ALTER TABLE shop.reviews
 ADD FOREIGN KEY("reviewed_id") REFERENCES shop.users("user_id");
 
 
-
 --Все активные товары
 CREATE OR REPLACE VIEW v_active_products_with_sellers AS
 SELECT 
@@ -125,15 +231,14 @@ SELECT
     u.user_id as seller_id,
     u.name as seller_name,
     u.rating as seller_rating,
-    COUNT(r.rewiew_id) as seller_total_reviews,
-    ROUND(AVG(CASE WHEN r.rewiewed_id = u.user_id THEN r.rating END), 1) as seller_avg_rating
+    COUNT(r.review_id) as seller_total_reviews,
+    ROUND(AVG(CASE WHEN r.reviewed_id = u.user_id THEN r.rating END), 1) as seller_avg_rating
 FROM products p
 JOIN users u ON p.seller_id = u.user_id
-LEFT JOIN rewiews r ON u.user_id = r.rewiewed_id
+LEFT JOIN reviews r ON u.user_id = r.reviewed_id
 WHERE p.status = 'active'
 GROUP BY p.product_id, p.title, p.category, p.price, p.condition, 
          p.created_at, u.user_id, u.name, u.rating;
-
 
 
 --Ежемесячный отчёт по продажам
@@ -158,5 +263,4 @@ ORDER BY month DESC, revenue DESC;
 
 CREATE INDEX idx_mv_monthly_sales ON mv_monthly_sales_report(month, category);
 
---Позже будет добавлен триггер
 REFRESH MATERIALIZED VIEW mv_monthly_sales_report;
